@@ -1,68 +1,75 @@
 # region imported madules
-import random
-import json
-from selenium import webdriver
 import time
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.options import Options
+import pandas as pd
+from selenium.common import NoSuchElementException
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.common.exceptions import NoSuchElementException
-import csv
-import logging
+
+import scrape_tools as st
+from my_utils import crint
+
 
 # endregion
 
-# region initiation
-service = Service(executable_path=r'C:/chromedriver.exe')
-options = webdriver.ChromeOptions()
-# options.add_argument('--headless')
-options.add_argument('--no-sandbox')
-options.add_argument('--disable-dev-shm-usage')
-driver = webdriver.Chrome(service=service, options=options)
-# endregion
+def count_to_int(input_text):
+    if input_text[-1] == 'K':
+        return int(float(input_text[:-1]) * 1000)
+    elif input_text[-1] == 'M':
+        return int(float(input_text[:-1]) * 1000000)
+
 
 # region main_code
-# story_buttons=driver.find_elements(By.CSS_SELECTOR,"button[class=_aam8]")
-username='healthywomen'
-driver.get(f'https://www.tiktok.com/@{username}')
+username = 'healthywomen'
+url = f'https://www.tiktok.com/@{username}/'
+driver = st.driver_initiation()
+crint('bot started!')
+# driver.get(url)
+st.get_endless_web_selenium(url, driver, False)
+time.sleep(25)
+crint('sleep time finished')
+link_elements = driver.find_elements(By.XPATH, '//a[contains(@class,"AMetaCaptionLine")]')
+links = [link_element.get_attribute('href') for link_element in link_elements]
 
-time.sleep(40)
-
-SCROLL_PAUSE_TIME = 2
-last_height = driver.execute_script("return document.body.scrollHeight")
-
-for i in range(4):
-    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-    time.sleep(SCROLL_PAUSE_TIME)
-    new_height = driver.execute_script("return document.body.scrollHeight")
-    if new_height == last_height:
-        break
-    last_height = new_height
-# <div class="css-11u47i-DivCardFooter e148ts220"><svg class="like-icon css-h342g4-StyledPlay e148ts225" width="18" data-e2e="" height="18" viewBox="0 0 48 48" fill="#fff" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M16 10.554V37.4459L38.1463 24L16 10.554ZM12 8.77702C12 6.43812 14.5577 4.99881 16.5569 6.21266L41.6301 21.4356C43.5542 22.6038 43.5542 25.3962 41.6301 26.5644L16.5569 41.7873C14.5577 43.0012 12 41.5619 12 39.223V8.77702Z"></path></svg><strong data-e2e="video-views" class="video-count css-dirst9-StrongVideoCount e148ts222">696.1K</strong></div>
-
-class_name="video-count"
 video_counts = driver.find_elements(By.XPATH, "//div[contains(@class, 'DivCardFooter')]")
+view_counts = [count_to_int(view_count_element.text) for view_count_element in video_counts]
+
 video_titles = driver.find_elements(By.XPATH, "//div[contains(@class, 'DivDesContainer')]")
+titles = [title_element.text for title_element in video_titles]
 
-data=[]
-fields=['title','count']
-for i in range(min(len(video_titles),len(video_counts))):
-    temp_dict={"title":video_titles[i].text,"count":video_counts[i].text}
-    data.append(temp_dict)
+df = pd.DataFrame([], columns=['caption', 'view_count', 'link', 'likes', 'comments', 'saves', 'shares', 'date'])
+for i in range(len(links)):
+    crint(links[i])
+    driver.get(links[i])
+    time.sleep(3)
+    try:
+        temp_list = [titles[i], view_counts[i], links[i]]
+        number_buttons = driver.find_elements(By.XPATH,
+                                              '//button[contains(@class,"ButtonActionItem")]')
+        temp_text = number_buttons[0].text
+        temp_list.append(count_to_int(temp_text))
 
-output_file = 'tiktok_video_views.csv'
+        temp_text = number_buttons[1].text
+        temp_list.append(count_to_int(temp_text))
 
-def save_to_csv(data, output_file,fields):
-    with open(output_file, 'w',encoding='UTF-8') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fields)
-    
-        # writing headers (field names)
-        writer.writeheader()
-    
-        # writing data rows
-        writer.writerows(data)
-        
-save_to_csv(data, output_file, fields)
-driver.quit()
+        temp_text = number_buttons[2].text
+        temp_list.append(count_to_int(temp_text))
+
+        temp_text = number_buttons[3].text
+        temp_list.append(count_to_int(temp_text))
+
+        date_span = driver.find_elements(By.XPATH,
+                                         '//span[contains(@class,"SpanOtherInfos")]')
+        temp_text = date_span[0].text.split()
+        temp_text = temp_text[-1]
+        if 2 < len(temp_text) < 6 and not temp_text.endswith('ago'):
+            temp_text = '2024-' + temp_text
+        temp_list.append(temp_text)
+        df.loc[len(df.index)] = temp_list
+    except NoSuchElementException as e:
+        print(driver.page_source)
+        crint(e)
+        driver.quit()
+        df.to_excel(username + '.xlsx')
+else:
+    driver.quit()
+    df.to_excel(username + '.xlsx')
+# endregion
